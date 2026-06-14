@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────
+#  Infra Monitoring Agent — Alert Thresholds
+#  Local Dev  : uses psutil (your laptop)
+#  Production : swap to Azure Monitor SDK
+# ─────────────────────────────────────────────
+
+monitoring:
+  # How often the agent runs a full check (seconds)
+  check_interval_seconds: 30
+
+  # How many consecutive breaches before escalating
+  breach_count_before_escalation: 2
+
+  thresholds:
+    cpu:
+      warning_percent: 70       # Agent flags it as MEDIUM
+      critical_percent: 80      # Agent escalates at this level
+      sustained_checks: 2       # Must breach this many checks in a row
+
+    memory:
+      warning_percent: 75
+      critical_percent: 85
+      sustained_checks: 2
+
+    disk:
+      warning_percent: 80
+      critical_percent: 90
+      sustained_checks: 1       # Disk is urgent — escalate on first breach
+
+    network:
+      max_errors_per_check: 10  # Error packets threshold
+
+  # Severity levels the agent uses in its output
+  severity_levels:
+    - LOW
+    - MEDIUM
+    - HIGH
+    - CRITICAL
+
+# ─────────────────────────────────────────────
+#  Production Azure Monitor config (not used
+#  locally — here for reference when you deploy)
+# ─────────────────────────────────────────────
+azure_monitor:
+  enabled: false                        # Set true on company laptop
+  subscription_id: "YOUR_SUB_ID"
+  resource_group: "YOUR_RG"
+  workspace_id: "YOUR_WORKSPACE_ID"
+  tenant_id: "YOUR_TENANT_ID"

@@ -1,0 +1,1 @@
+# Lazy imports — nothing loads until explicitly called
