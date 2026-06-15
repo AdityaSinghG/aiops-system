@@ -1,8 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  agent/graph.py
-#
-#  Infrastructure Monitoring Agent — LangGraph core.
-#
 #  Graph flow:
 #  [START] → [collect_metrics_node] → [analyse_metrics_node] → [parse_output_node] → [END]
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +225,50 @@ def parse_output_node(state: AgentState) -> dict:
         f"Escalate: {escalate}"
     )
 
+    # ── Feature 1: Wire memory — save every run to long-term storage ─────────
+    try:
+        from infra_monitoring.agent.memory import (
+            save_health_report, save_escalation_event, save_metric_snapshot
+        )
+
+        raw = state.get("raw_metrics", {})
+        cpu_val = raw.get("cpu", {}).get("cpu_percent_overall", 0.0) or 0.0
+        mem_val = raw.get("memory", {}).get("ram", {}).get("percent_used", 0.0) or 0.0
+        disk_parts = raw.get("disk", {}).get("partitions", [])
+        disk_max = max((p.get("percent_used", 0) for p in disk_parts), default=0.0)
+        net = raw.get("network", {}).get("overall", {})
+        net_errors = (net.get("errors_in", 0) or 0) + (net.get("errors_out", 0) or 0)
+
+        report_id = save_health_report(
+            report=final_report,
+            severity=severity,
+            overall_status=overall_status,
+            escalated=escalate,
+            check_timestamp=datetime.datetime.now().isoformat(),
+        )
+
+        save_metric_snapshot(
+            cpu_percent=cpu_val,
+            memory_percent=mem_val,
+            disk_percent_max=disk_max,
+            network_errors=net_errors,
+            check_timestamp=datetime.datetime.now().isoformat(),
+        )
+
+        if escalate:
+            save_escalation_event(
+                report_id=report_id,
+                severity=severity,
+                reason=f"Severity {severity} detected — escalation triggered",
+                affected_resource=severity,
+                check_timestamp=datetime.datetime.now().isoformat(),
+            )
+
+        logger.info(f"Memory saved — report_id: {report_id}")
+
+    except Exception as mem_err:
+        logger.warning(f"Memory save failed (non-critical): {mem_err}")
+
     return {
         "escalate": escalate,
         "severity": severity,
@@ -275,6 +316,19 @@ def run_and_escalate():
     logger.info("Running Infra Monitoring Agent...")
     result = infra_agent.invoke({"messages": []})
 
+    # ── Feature 3: Recurring incident detection ───────────────────────────────
+    try:
+        from infra_monitoring.agent.memory import get_escalation_count
+        recent = get_escalation_count(hours=2)
+        recurring = recent.get("count", 0) >= 3
+        if recurring:
+            logger.warning(
+                f"RECURRING INCIDENT — {recent['count']} escalations in last 2 hours"
+            )
+    except Exception:
+        recurring = False
+        recent = {"count": 0}
+
     if not result.get("escalate", False):
         logger.info(f"System healthy — Status: {result.get('overall_status')}")
         print(f"\n[Infra Monitoring] System is HEALTHY. No incidents to resolve.")
@@ -295,20 +349,62 @@ def run_and_escalate():
     network = raw.get("network", {})
 
     metrics = MetricsSnapshot(
-        cpu_percent=cpu.get("cpu_percent"),
-        memory_percent=memory.get("percent"),
-        disk_percent=disk.get("percent"),
-        network_latency_ms=network.get("latency_ms"),
+        cpu_percent=cpu.get("cpu_percent_overall"),
+        memory_percent=memory.get("ram", {}).get("percent_used"),
+        disk_percent=max(
+            (p.get("percent_used", 0) for p in disk.get("partitions", [])),
+            default=None
+        ),
+        network_latency_ms=None,
     )
+
+    # ── Feature 2: Extract specific breaching metric for better context ───────
+    report_text = result.get("report", "")
+    report_upper = report_text.upper()
+
+    if "CPU" in report_upper and ("CRITICAL" in report_upper or "HIGH" in report_upper):
+        breaching_metric = "CPU"
+        target_service = "system-cpu"
+    elif "MEMORY" in report_upper and ("CRITICAL" in report_upper or "HIGH" in report_upper):
+        breaching_metric = "Memory"
+        target_service = "system-memory"
+    elif "DISK" in report_upper and "CRITICAL" in report_upper:
+        breaching_metric = "Disk"
+        target_service = "system-disk"
+    elif "NETWORK" in report_upper and ("CRITICAL" in report_upper or "HIGH" in report_upper):
+        breaching_metric = "Network"
+        target_service = "system-network"
+    else:
+        breaching_metric = "System"
+        target_service = "system"
+
+    cpu_val = cpu.get("cpu_percent_overall", "unknown")
+    mem_val = memory.get("ram", {}).get("percent_used", "unknown")
+    disk_parts = disk.get("partitions", [])
+    disk_max = max((p.get("percent_used", 0) for p in disk_parts), default=0)
+
+    structured_description = (
+        f"BREACHING METRIC: {breaching_metric}\n"
+        f"CPU: {cpu_val}% | Memory: {mem_val}% | Disk(max): {disk_max}%\n"
+        f"Severity: {result.get('severity')} | Status: {result.get('overall_status')}\n\n"
+        f"FULL REPORT EXCERPT:\n{report_text[:1000]}"
+    )
+
+    alert_title = f"{breaching_metric} {result.get('severity')} on {os.getenv('HOSTNAME', 'local-host')}"
+
+    # Feature 3 cont — flag recurring in title and force P1
+    if recurring:
+        alert_title = f"[RECURRING x{recent['count']}] {alert_title}"
+        p_level = "P1"
 
     event = AIOpsEvent(
         event_type="incident",
         source_agent="infra_monitoring",
         severity=p_level,
         target_host=os.getenv("HOSTNAME", "local-host"),
-        target_service="system",
-        alert_title=f"{result.get('overall_status')} detected by Infra Monitoring Agent",
-        alert_description=result.get("report", "")[:2500],
+        target_service=target_service,
+        alert_title=alert_title,
+        alert_description=structured_description,
         metrics=metrics,
         environment="production",
     )
