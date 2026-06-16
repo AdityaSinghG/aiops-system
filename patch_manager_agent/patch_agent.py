@@ -253,8 +253,16 @@ def analyse_and_plan_node(state: PatchAgentState) -> PatchAgentState:
     # Build context from collected data
     context_parts = []
 
-    if state.get("scan_results"):
+   if state.get("scan_results"):
         scan = state["scan_results"]
+        # Send compact summary only — full JSON is too large for llama3.2
+        top_servers = scan.get('servers', [])[:5]  # top 5 only
+        server_lines = "\n".join([
+            f"  - {s['hostname']} ({s['environment']}, {s['criticality']}) "
+            f"— {s['pending_patch_count']} patches, highest CVE: {s['highest_cve_score']}, "
+            f"last patched: {s['days_since_patched']} days ago"
+            for s in top_servers
+        ])
         context_parts.append(f"""
 === PATCH SCAN RESULTS ===
 Scan Time: {scan.get('scan_timestamp', 'Unknown')}
@@ -263,8 +271,8 @@ Total pending patches: {scan.get('total_pending_patches', 0)}
 Critical patches: {scan.get('critical_patch_count', 0)}
 Important patches: {scan.get('important_patch_count', 0)}
 
-Servers needing patches:
-{json.dumps(scan.get('servers', []), indent=2)}
+Top priority servers (showing 5 of {scan.get('total_servers_with_patches', 0)}):
+{server_lines}
 """)
 
     if state.get("patch_schedule"):
@@ -278,6 +286,10 @@ Schedule notes: {json.dumps(sched.get('schedule_notes', []), indent=2)}
 Deployment plan:
 {json.dumps(sched.get('deployment_plan', []), indent=2)}
 """)
+
+Batches: {[b['batch_name'] for b in sched.get('deployment_plan', [])]}
+Estimated duration: {sched.get('estimated_total_duration_hours', 0)} hours
+Notes: {sched.get('schedule_notes', [])[:3]}
 
     if state.get("compliance_report"):
         comp = state["compliance_report"]
