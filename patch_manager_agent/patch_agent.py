@@ -253,14 +253,15 @@ def analyse_and_plan_node(state: PatchAgentState) -> PatchAgentState:
     # Build context from collected data
     context_parts = []
 
-   if state.get("scan_results"):
+    if state.get("scan_results"):
         scan = state["scan_results"]
-        # Send compact summary only — full JSON is too large for llama3.2
-        top_servers = scan.get('servers', [])[:5]  # top 5 only
+        # Compact summary only — full JSON is too large for llama3.2 and causes it to hang
+        top_servers = scan.get("servers", [])[:5]
         server_lines = "\n".join([
-            f"  - {s['hostname']} ({s['environment']}, {s['criticality']}) "
-            f"— {s['pending_patch_count']} patches, highest CVE: {s['highest_cve_score']}, "
-            f"last patched: {s['days_since_patched']} days ago"
+            f"  - {s['hostname']} ({s.get('environment','?')}, {s.get('criticality','?')}) "
+            f"— {s.get('pending_patch_count', len(s.get('pending_patches',[])))} patches, "
+            f"highest CVE: {s.get('highest_cve_score', '?')}, "
+            f"last patched: {s.get('days_since_patched', '?')} days ago"
             for s in top_servers
         ])
         context_parts.append(f"""
@@ -271,44 +272,50 @@ Total pending patches: {scan.get('total_pending_patches', 0)}
 Critical patches: {scan.get('critical_patch_count', 0)}
 Important patches: {scan.get('important_patch_count', 0)}
 
-Top priority servers (showing 5 of {scan.get('total_servers_with_patches', 0)}):
+Top priority servers (showing up to 5):
 {server_lines}
 """)
 
     if state.get("patch_schedule"):
         sched = state["patch_schedule"]
+        batch_names = [b['batch_name'] for b in sched.get('deployment_plan', [])]
         context_parts.append(f"""
 === DEPLOYMENT SCHEDULE ===
 Total batches: {sched.get('batch_count', 0)}
 Estimated total duration: {sched.get('estimated_total_duration_hours', 0)} hours
-Schedule notes: {json.dumps(sched.get('schedule_notes', []), indent=2)}
-
-Deployment plan:
-{json.dumps(sched.get('deployment_plan', []), indent=2)}
+Batches: {batch_names}
+Key notes: {sched.get('schedule_notes', [])[:2]}
 """)
-
-Batches: {[b['batch_name'] for b in sched.get('deployment_plan', [])]}
-Estimated duration: {sched.get('estimated_total_duration_hours', 0)} hours
-Notes: {sched.get('schedule_notes', [])[:3]}
 
     if state.get("compliance_report"):
         comp = state["compliance_report"]
+        summary = comp.get("fleet_summary", {})
         context_parts.append(f"""
 === COMPLIANCE REPORT ===
-{json.dumps(comp, indent=2)}
+Total servers: {summary.get('total_servers', 0)}
+Compliant: {summary.get('compliant', 0)}
+Warning: {summary.get('warning', 0)}
+Overdue: {summary.get('overdue', 0)}
+Critical overdue: {summary.get('critical_overdue', 0)}
+Overall compliance rate: {summary.get('overall_compliance_rate', 'Unknown')}
 """)
 
     if state.get("server_history"):
         hist = state["server_history"]
         context_parts.append(f"""
 === SERVER PATCH HISTORY ===
-{json.dumps(hist, indent=2)}
+Hostname: {hist.get('hostname')}
+Role: {hist.get('role')}
+OS: {hist.get('os')}
+Last patched: {hist.get('last_patched')} ({hist.get('days_since_last_patch')} days ago)
+Total patches applied: {hist.get('total_patches_applied', 0)}
+Recent patches: {hist.get('patch_history', [])[:3]}
 """)
 
     if state.get("knowledge_base_results"):
         kb_content = "\n\n".join([
-            f"[{r['playbook_id']}] {r['title']}:\n{r['content'][:600]}..."
-            for r in state["knowledge_base_results"]
+            f"[{r['playbook_id']}] {r['title']}:\n{r['content'][:200]}..."
+            for r in state["knowledge_base_results"][:2]
         ])
         context_parts.append(f"""
 === RELEVANT PROCEDURES FROM KNOWLEDGE BASE ===
@@ -693,11 +700,8 @@ ORIGINAL SCAN DATA:
   Critical patches: {scan.get('critical_patch_count', 'N/A')}
   Important patches: {scan.get('important_patch_count', 'N/A')}
 
-EXECUTION DETAILS:
-{json.dumps(execution, indent=2)[:1500]}
-
-PREVIOUS ANALYSIS:
-{state.get('llm_analysis', 'Not available')[:500]}
+PREVIOUS ANALYSIS SUMMARY:
+{state.get('llm_analysis', 'Not available')[:300]}
 
 Write a concise patch management report with these sections:
 1. EXECUTIVE SUMMARY (2-3 sentences, what happened overall)

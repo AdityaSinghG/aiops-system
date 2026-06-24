@@ -10,10 +10,10 @@
 #    - Logs escalation decisions
 #    - Shows memory summary and recent history on startup
 #
-#  HOW TO RUN:
-#    Single check   : python main.py
-#    Continuous loop: python main.py --loop
-#    Show history   : python main.py --history
+#  HOW TO RUN (run from the project ROOT, not from inside infra_monitoring/):
+#    Single check   : python -m infra_monitoring.main
+#    Continuous loop: python -m infra_monitoring.main --loop
+#    Show history   : python -m infra_monitoring.main --history
 #
 #  LOCAL DEV  : Uses Ollama + psutil — zero cost, runs offline
 #  PRODUCTION : Swap LLM config in agent/graph.py only — nothing here changes
@@ -33,8 +33,8 @@ from rich.text import Text
 from rich import box
 from rich.rule import Rule
 
-from agent.graph import infra_agent
-from agent.memory import (
+from infra_monitoring.agent.graph import infra_agent, run_and_escalate   # ⭐ CHANGED — added infra_monitoring. prefix + run_and_escalate
+from infra_monitoring.agent.memory import (                   # ⭐ CHANGED — added infra_monitoring. prefix
     save_health_report,
     save_escalation_event,
     save_metric_snapshot,
@@ -349,5 +349,14 @@ if __name__ == "__main__":
     elif args.loop:
         run_continuous_loop()
     else:
-        run_single_check()
-        
+        check_result = run_single_check()
+
+        # ⭐ NEW — actually run the escalation logic (incident escalation +
+        # patch escalation), reusing the result we already computed above
+        # instead of invoking the LLM a second time. run_single_check()
+        # handles the pretty display; run_and_escalate() is what fires the
+        # real escalation pipeline that routes events through OURA to
+        # Incident Resolver / Patch Manager.
+        console.print()
+        console.rule("[bold blue]Escalation Pipeline[/bold blue]")
+        run_and_escalate(result=check_result)

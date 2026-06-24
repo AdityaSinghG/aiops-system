@@ -1,0 +1,21 @@
+[
+  {
+    "patch_id": "KB5034441",
+    "title": "2024-01 Cumulative Update for Windows Server 2022",
+    "severity": "critical",
+    "cve_score": 9.8,
+    "deployed_at": "2026-06-19T01:04:54.657504",
+    "outcome": "failed",
+    "servers_targeted": [
+      "WEB-PROD-01",
+      "WEB-PROD-02",
+      "WEB-STG-01",
+      "INFRA-MGMT-01"
+    ],
+    "servers_passed": 3,
+    "servers_failed": 1,
+    "kb_was_used": true,
+    "notes": "Some servers failed health check",
+    "source_file": "KB5034441.json"
+  }
+]

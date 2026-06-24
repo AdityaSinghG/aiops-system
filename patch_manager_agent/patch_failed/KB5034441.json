@@ -1,0 +1,17 @@
+{
+  "patch_id": "KB5034441",
+  "title": "2024-01 Cumulative Update for Windows Server 2022",
+  "severity": "critical",
+  "cve_ids": [
+    "CVE-2024-21338",
+    "CVE-2024-21345"
+  ],
+  "cve_score": 9.8,
+  "affected_os": [
+    "Windows Server 2022"
+  ],
+  "patch_type": "security",
+  "reboot_required": true,
+  "release_date": "2024-01-09",
+  "description": "Critical security update addressing remote code execution in Windows kernel."
+}

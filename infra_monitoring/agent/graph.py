@@ -1,7 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  agent/graph.py
 #  Graph flow:
-#  [START] → [collect_metrics_node] → [analyse_metrics_node] → [parse_output_node] → [END]
+#  [START] → [collect_metrics_node] → [check_patch_status_node] →
+#  [analyse_metrics_node] → [parse_output_node] → [END]
 # ─────────────────────────────────────────────────────────────────────────────
 
 import sys
@@ -23,7 +24,8 @@ from infra_monitoring.agent.tools import (
     get_memory_metrics,
     get_disk_metrics,
     get_network_metrics,
-    get_top_processes
+    get_top_processes,
+    check_os_patch_status     # ⭐ NEW
 )
 from infra_monitoring.agent.prompts import INFRA_MONITORING_SYSTEM_PROMPT
 from shared.event_schema import AIOpsEvent, MetricsSnapshot
@@ -53,6 +55,7 @@ logger = logging.getLogger(__name__)
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
     raw_metrics: dict
+    patch_status: dict          # ⭐ NEW — result of check_os_patch_status
     escalate: bool
     severity: str
     overall_status: str
@@ -117,7 +120,40 @@ def collect_metrics_node(state: AgentState) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  NODE 2 — analyse_metrics_node
+#  NODE 2 — check_patch_status_node  ⭐ NEW
+#
+#  Checks whether the local OS has any outstanding patches by calling
+#  check_os_patch_status. This runs independently of the LLM — it's a
+#  pure data-collection step, same pattern as collect_metrics_node.
+#  Runs after metrics collection and before the LLM analysis step.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_patch_status_node(state: AgentState) -> dict:
+    logger.info("Checking OS patch status...")
+
+    try:
+        result = check_os_patch_status.invoke({})
+        logger.info(
+            f"Patch check complete — OS: {result.get('mapped_os_label')} | "
+            f"Outstanding: {result.get('patches_outstanding', 0)} | "
+            f"Highest severity: {result.get('highest_severity')}"
+        )
+    except Exception as e:
+        error_msg = f"Patch status check failed: {str(e)}"
+        logger.error(error_msg)
+        result = {
+            "patches_outstanding": 0,
+            "outstanding_patches": [],
+            "highest_severity": "none",
+            "patch_action_needed": False,
+            "load_error": error_msg,
+        }
+
+    return {"patch_status": result}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  NODE 3 — analyse_metrics_node
 # ─────────────────────────────────────────────────────────────────────────────
 
 def analyse_metrics_node(state: AgentState) -> dict:
@@ -176,7 +212,7 @@ or example values under any circumstances.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  NODE 3 — parse_output_node
+#  NODE 4 — parse_output_node
 # ─────────────────────────────────────────────────────────────────────────────
 
 def parse_output_node(state: AgentState) -> dict:
@@ -286,16 +322,18 @@ def parse_output_node(state: AgentState) -> dict:
 def build_infra_agent_graph():
     builder = StateGraph(AgentState)
 
-    builder.add_node("collect_metrics", collect_metrics_node)
-    builder.add_node("analyse_metrics", analyse_metrics_node)
-    builder.add_node("parse",           parse_output_node)
+    builder.add_node("collect_metrics",     collect_metrics_node)
+    builder.add_node("check_patch_status",  check_patch_status_node)   # ⭐ NEW
+    builder.add_node("analyse_metrics",     analyse_metrics_node)
+    builder.add_node("parse",               parse_output_node)
 
     builder.set_entry_point("collect_metrics")
-    builder.add_edge("collect_metrics", "analyse_metrics")
+    builder.add_edge("collect_metrics", "check_patch_status")          # ⭐ NEW
+    builder.add_edge("check_patch_status", "analyse_metrics")          # ⭐ NEW
     builder.add_edge("analyse_metrics", "parse")
     builder.add_edge("parse", END)
 
-    logger.info("Infra agent graph compiled successfully")
+    logger.info("Infra agent graph compiled successfully (with patch status check)")
     return builder.compile()
 
 
@@ -310,11 +348,82 @@ infra_agent = build_infra_agent_graph()
 #  RUN AND ESCALATE — called by main.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_and_escalate():
-    from app_orchestrator import route_event
+def run_and_escalate(result: dict = None):
+    """
+    Runs the escalation pipeline (incident escalation + patch escalation).
 
-    logger.info("Running Infra Monitoring Agent...")
-    result = infra_agent.invoke({"messages": []})
+    Args:
+        result: Optional — a pre-computed agent result (e.g. from
+                infra_agent.invoke() already run by main.py's
+                run_single_check()). If not provided, invokes the agent
+                fresh. This avoids running the LLM twice when main.py
+                already has a result it can pass in.
+    """
+    from oura_router import oura_receive as route_event    # ⭐ CHANGED — now routes through OURA
+
+    if result is None:
+        logger.info("Running Infra Monitoring Agent...")
+        result = infra_agent.invoke({"messages": []})
+    else:
+        logger.info("Reusing already-computed agent result — skipping duplicate LLM call")
+
+    # ── NEW: Patch escalation — independent of the health-metric escalation ──
+    # This runs BEFORE the "system healthy, no incident" early return below,
+    # because a missing patch on an otherwise healthy server is still worth
+    # flagging on its own, separate from CPU/memory/disk health.
+    try:
+        patch_status = result.get("patch_status", {})
+        outstanding = patch_status.get("outstanding_patches", [])
+
+        # Only escalate for critical or important severity patches — moderate/low
+        # patches follow the normal scheduled maintenance cycle and don't need
+        # an urgent agent-to-agent handoff.
+        urgent_patches = [
+            p for p in outstanding
+            if p.get("severity") in ("critical", "important")
+        ]
+
+        if urgent_patches:
+            top_patch = urgent_patches[0]  # already sorted critical-first
+            patch_severity_map = {"critical": "P1", "important": "P2"}
+            patch_p_level = patch_severity_map.get(top_patch["severity"], "P3")
+
+            patch_event = AIOpsEvent(
+                event_type="patch_needed",
+                source_agent="infra_monitoring",
+                severity=patch_p_level,
+                target_host=os.getenv("HOSTNAME", "local-host"),
+                target_service="os-patching",
+                alert_title=(
+                    f"{len(urgent_patches)} outstanding patch(es) detected on "
+                    f"{patch_status.get('mapped_os_label', 'unknown OS')} "
+                    f"(highest: {top_patch['patch_id']}, {top_patch['severity']})"
+                ),
+                alert_description=(
+                    f"OS detected: {patch_status.get('mapped_os_label')}\n"
+                    f"Outstanding patches: {len(outstanding)}\n"
+                    f"Most urgent: {top_patch['patch_id']} — {top_patch['title']}\n"
+                    f"Severity: {top_patch['severity']} | CVE score: {top_patch['cve_score']}\n"
+                    f"CVE IDs: {', '.join(top_patch.get('cve_ids', []))}"
+                ),
+                metrics=MetricsSnapshot(extra={"patches_outstanding": len(outstanding)}),
+                environment="production",
+            )
+
+            logger.info(
+                f"Patch escalation — {len(urgent_patches)} urgent patch(es) found. "
+                f"Routing patch_needed event."
+            )
+
+            patch_resolved_event = route_event(patch_event)
+            logger.info(
+                f"Patch event resolution status: {patch_resolved_event.resolution_status}"
+            )
+
+    except Exception as patch_escalation_error:
+        logger.warning(
+            f"Patch escalation failed (non-critical): {patch_escalation_error}"
+        )
 
     # ── Feature 3: Recurring incident detection ───────────────────────────────
     try:
