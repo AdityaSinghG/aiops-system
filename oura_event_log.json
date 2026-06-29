@@ -50,5 +50,18 @@
     "routing_hops": 1,
     "resolution_status": "resolved",
     "resolution_summary": "Patch Manager Agent ran task 'patch_server' on WEB-PROD-01. Status: complete. Patches applied: 1, failed: 0, rolled back: 0."
+  },
+  {
+    "event_id": "20e61301-915c-4c69-870b-cff0f9c96419",
+    "received_at": "2026-06-30T02:08:16.330853",
+    "resolved_at": "2026-06-30T02:11:21.714207",
+    "source_agent": "infra_monitoring",
+    "event_type": "patch_needed",
+    "severity": "P1",
+    "target_host": "ADISINGH",
+    "alert_title": "3 outstanding patch(es) detected on Windows Server 2022 (highest: KB5034441, critical)",
+    "routing_hops": 1,
+    "resolution_status": "resolved",
+    "resolution_summary": "Patch Manager Agent ran task 'patch_server' on WEB-PROD-01. Status: complete. Patches applied: 1, failed: 0, rolled back: 0. KB check: \ud83d\udd34 CRITICAL patch \u2014 deploy immediately following emergency procedure PB-014. (past deployments: 0)"
   }
 ]

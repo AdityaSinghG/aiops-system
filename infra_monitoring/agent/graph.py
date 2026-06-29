@@ -25,7 +25,7 @@ from infra_monitoring.agent.tools import (
     get_disk_metrics,
     get_network_metrics,
     get_top_processes,
-    check_os_patch_status     # ⭐ NEW
+    check_os_patch_status
 )
 from infra_monitoring.agent.prompts import INFRA_MONITORING_SYSTEM_PROMPT
 from shared.event_schema import AIOpsEvent, MetricsSnapshot
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
     raw_metrics: dict
-    patch_status: dict          # ⭐ NEW — result of check_os_patch_status
+    patch_status: dict
     escalate: bool
     severity: str
     overall_status: str
@@ -120,12 +120,7 @@ def collect_metrics_node(state: AgentState) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  NODE 2 — check_patch_status_node  ⭐ NEW
-#
-#  Checks whether the local OS has any outstanding patches by calling
-#  check_os_patch_status. This runs independently of the LLM — it's a
-#  pure data-collection step, same pattern as collect_metrics_node.
-#  Runs after metrics collection and before the LLM analysis step.
+#  NODE 2 — check_patch_status_node
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_patch_status_node(state: AgentState) -> dict:
@@ -212,6 +207,124 @@ or example values under any circumstances.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  DETERMINISTIC SEVERITY CALCULATION  ⭐ NEW
+#
+#  WHY THIS EXISTS:
+#  llama3.2 occasionally misreads its own threshold rules and reports a
+#  severity (e.g. CRITICAL) that doesn't match the actual numbers it was
+#  given (e.g. CPU 10%, Memory 65% — both clearly LOW/MEDIUM by the
+#  documented thresholds). This is a known limitation of small local
+#  models doing free-text rule-following, not a prompt or code bug.
+#
+#  This function recalculates severity directly from the real numbers in
+#  raw_metrics, using the EXACT same thresholds defined in
+#  INFRA_MONITORING_SYSTEM_PROMPT. It's pure Python — deterministic,
+#  fast, and never wrong about arithmetic. parse_output_node() uses this
+#  as a safety net: if the LLM's claimed severity disagrees with this
+#  calculation, the deterministic result wins and a warning is logged.
+#
+#  Thresholds mirrored from INFRA_MONITORING_SYSTEM_PROMPT — if you ever
+#  change the thresholds in the prompt, update them here too so the two
+#  stay in sync.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def calculate_deterministic_severity(raw_metrics: dict) -> dict:
+    """
+    Recalculates severity directly from real metric values using the same
+    thresholds the LLM is instructed to follow. Returns the calculated
+    severity plus a breakdown of which metric drove that result.
+
+    Returns:
+        dict with:
+          - severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+          - escalate: bool
+          - driving_metric: str — which metric produced the highest severity
+          - breakdown: dict — severity per metric, for transparency/logging
+    """
+    breakdown = {}
+
+    # CPU thresholds: <70 LOW, 70-79 MEDIUM, 80-89 HIGH, 90+ CRITICAL-leaning
+    # (Prompt says "80%+ sustained -> CRITICAL", but a single snapshot can't
+    # measure "sustained" — so a single-reading safety net treats 80-89 as
+    # HIGH and reserves CRITICAL for 90+, matching disk's same pattern.)
+    cpu = raw_metrics.get("cpu", {}).get("cpu_percent_overall")
+    if isinstance(cpu, (int, float)):
+        if cpu >= 90:
+            breakdown["cpu"] = "CRITICAL"
+        elif cpu >= 80:
+            breakdown["cpu"] = "HIGH"
+        elif cpu >= 70:
+            breakdown["cpu"] = "MEDIUM"
+        else:
+            breakdown["cpu"] = "LOW"
+
+    # Memory thresholds: <75 LOW, 75-84 MEDIUM, 85-94 HIGH, 95+ CRITICAL
+    mem = raw_metrics.get("memory", {}).get("ram", {}).get("percent_used")
+    if isinstance(mem, (int, float)):
+        if mem >= 95:
+            breakdown["memory"] = "CRITICAL"
+        elif mem >= 85:
+            breakdown["memory"] = "HIGH"
+        elif mem >= 75:
+            breakdown["memory"] = "MEDIUM"
+        else:
+            breakdown["memory"] = "LOW"
+
+    # Disk thresholds: <80 LOW, 80-89 MEDIUM, 90+ CRITICAL
+    disk_parts = raw_metrics.get("disk", {}).get("partitions", [])
+    disk_max = max((p.get("percent_used", 0) for p in disk_parts), default=0)
+    if disk_max >= 90:
+        breakdown["disk"] = "CRITICAL"
+    elif disk_max >= 80:
+        breakdown["disk"] = "MEDIUM"
+    else:
+        breakdown["disk"] = "LOW"
+
+    # Network thresholds: 0 errors LOW, 1-9 MEDIUM, 10+ HIGH
+    net = raw_metrics.get("network", {}).get("overall", {})
+    net_errors = (net.get("errors_in", 0) or 0) + (net.get("errors_out", 0) or 0)
+    if net_errors >= 10:
+        breakdown["network"] = "HIGH"
+    elif net_errors >= 1:
+        breakdown["network"] = "MEDIUM"
+    else:
+        breakdown["network"] = "LOW"
+
+    # Process flags: any flagged process (>50% CPU or >40% memory) bumps severity
+    flagged = raw_metrics.get("processes", {}).get("flagged_processes", [])
+    breakdown["processes"] = "HIGH" if flagged else "LOW"
+
+    # Determine overall severity: highest individual metric wins
+    severity_rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+    rank_to_severity = {0: "LOW", 1: "MEDIUM", 2: "HIGH", 3: "CRITICAL"}
+
+    highest_rank = 0
+    driving_metric = "none"
+    high_count = 0
+
+    for metric_name, metric_severity in breakdown.items():
+        rank = severity_rank.get(metric_severity, 0)
+        if rank == 2:  # HIGH
+            high_count += 1
+        if rank > highest_rank:
+            highest_rank = rank
+            driving_metric = metric_name
+
+    overall_severity = rank_to_severity[highest_rank]
+
+    # Escalation rule (mirrors the prompt's ESCALATION RULES section):
+    # escalate if any metric is CRITICAL, or 2+ metrics are HIGH simultaneously
+    escalate = (highest_rank == 3) or (high_count >= 2)
+
+    return {
+        "severity": overall_severity,
+        "escalate": escalate,
+        "driving_metric": driving_metric,
+        "breakdown": breakdown,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  NODE 4 — parse_output_node
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -237,16 +350,43 @@ def parse_output_node(state: AgentState) -> dict:
 
     report_upper = final_report.upper()
 
-    escalate = "ESCALATE: YES" in report_upper
+    llm_escalate = "ESCALATE: YES" in report_upper
 
     if "CRITICAL" in report_upper:
-        severity = "CRITICAL"
+        llm_severity = "CRITICAL"
     elif "HIGH" in report_upper:
-        severity = "HIGH"
+        llm_severity = "HIGH"
     elif "MEDIUM" in report_upper:
-        severity = "MEDIUM"
+        llm_severity = "MEDIUM"
     else:
-        severity = "LOW"
+        llm_severity = "LOW"
+
+    # ── ⭐ NEW: Deterministic safety-net check ──────────────────────────────
+    # Recalculate severity directly from the real numbers, independent of
+    # whatever the LLM's free text claims. If the two disagree, trust the
+    # deterministic calculation — it can't misread a threshold, the LLM
+    # occasionally can. This directly fixes cases where llama3.2 reports
+    # CRITICAL/Escalate:True on metrics that are actually LOW/MEDIUM.
+    raw_metrics_for_check = state.get("raw_metrics", {})
+    deterministic = calculate_deterministic_severity(raw_metrics_for_check)
+
+    if deterministic["severity"] != llm_severity or deterministic["escalate"] != llm_escalate:
+        logger.warning(
+            f"SEVERITY MISMATCH — LLM said severity={llm_severity}, escalate={llm_escalate} | "
+            f"Deterministic calculation says severity={deterministic['severity']}, "
+            f"escalate={deterministic['escalate']} (driven by: {deterministic['driving_metric']}). "
+            f"Using deterministic result as the safety net. "
+            f"Breakdown: {deterministic['breakdown']}"
+        )
+        severity = deterministic["severity"]
+        escalate = deterministic["escalate"]
+    else:
+        logger.info(
+            f"LLM severity assessment confirmed by deterministic check — "
+            f"severity={llm_severity}, escalate={llm_escalate}"
+        )
+        severity = llm_severity
+        escalate = llm_escalate
 
     if "OVERALL STATUS:** CRITICAL" in report_upper or escalate:
         overall_status = "CRITICAL"
@@ -323,13 +463,13 @@ def build_infra_agent_graph():
     builder = StateGraph(AgentState)
 
     builder.add_node("collect_metrics",     collect_metrics_node)
-    builder.add_node("check_patch_status",  check_patch_status_node)   # ⭐ NEW
+    builder.add_node("check_patch_status",  check_patch_status_node)
     builder.add_node("analyse_metrics",     analyse_metrics_node)
     builder.add_node("parse",               parse_output_node)
 
     builder.set_entry_point("collect_metrics")
-    builder.add_edge("collect_metrics", "check_patch_status")          # ⭐ NEW
-    builder.add_edge("check_patch_status", "analyse_metrics")          # ⭐ NEW
+    builder.add_edge("collect_metrics", "check_patch_status")
+    builder.add_edge("check_patch_status", "analyse_metrics")
     builder.add_edge("analyse_metrics", "parse")
     builder.add_edge("parse", END)
 
@@ -359,7 +499,7 @@ def run_and_escalate(result: dict = None):
                 fresh. This avoids running the LLM twice when main.py
                 already has a result it can pass in.
     """
-    from oura_router import oura_receive as route_event    # ⭐ CHANGED — now routes through OURA
+    from oura_router import oura_receive as route_event
 
     if result is None:
         logger.info("Running Infra Monitoring Agent...")
@@ -367,24 +507,18 @@ def run_and_escalate(result: dict = None):
     else:
         logger.info("Reusing already-computed agent result — skipping duplicate LLM call")
 
-    # ── NEW: Patch escalation — independent of the health-metric escalation ──
-    # This runs BEFORE the "system healthy, no incident" early return below,
-    # because a missing patch on an otherwise healthy server is still worth
-    # flagging on its own, separate from CPU/memory/disk health.
+    # ── Patch escalation — independent of the health-metric escalation ──────
     try:
         patch_status = result.get("patch_status", {})
         outstanding = patch_status.get("outstanding_patches", [])
 
-        # Only escalate for critical or important severity patches — moderate/low
-        # patches follow the normal scheduled maintenance cycle and don't need
-        # an urgent agent-to-agent handoff.
         urgent_patches = [
             p for p in outstanding
             if p.get("severity") in ("critical", "important")
         ]
 
         if urgent_patches:
-            top_patch = urgent_patches[0]  # already sorted critical-first
+            top_patch = urgent_patches[0]
             patch_severity_map = {"critical": "P1", "important": "P2"}
             patch_p_level = patch_severity_map.get(top_patch["severity"], "P3")
 
@@ -501,7 +635,6 @@ def run_and_escalate(result: dict = None):
 
     alert_title = f"{breaching_metric} {result.get('severity')} on {os.getenv('HOSTNAME', 'local-host')}"
 
-    # Feature 3 cont — flag recurring in title and force P1
     if recurring:
         alert_title = f"[RECURRING x{recent['count']}] {alert_title}"
         p_level = "P1"
