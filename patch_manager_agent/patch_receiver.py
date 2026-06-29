@@ -40,6 +40,7 @@ import os
 import json
 import time
 import shutil
+import random
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -212,6 +213,81 @@ PAST DEPLOYMENTS: {kb_check['past_deployment_count']} previous deployment(s) fou
 
 
 # ─────────────────────────────────────────────
+#  SIMULATE PATCH APPLY (FROM PATCH DATA DIRECTLY)  ⭐ NEW
+#
+#  WHY THIS EXISTS:
+#  The original code called simulate_patch_apply(hostname, patch_id) from
+#  patch_inventory.py, which only succeeds if patch_id already exists in
+#  the hardcoded AVAILABLE_PATCHES list. That list only contains the 10
+#  original hand-written demo patches (KB5034441, USN-6648-1, etc).
+#
+#  Patches pulled live from patch_feed_poller.py (real Ubuntu USNs from
+#  Canonical's feed) are NEVER in that static list — so every one of them
+#  used to fail immediately with "Patch {id} not found in patch library",
+#  even though we already have the complete patch data sitting right here
+#  in the `patch` dict (read straight from the inbox file).
+#
+#  This function simulates the patch apply using that data directly,
+#  instead of requiring a redundant lookup in the static catalogue. Same
+#  90% success / 10% failure simulation behaviour as before, so realism
+#  (occasional failures, rollback triggers) is unchanged.
+# ─────────────────────────────────────────────
+
+def simulate_patch_apply_from_data(hostname: str, patch: dict) -> dict:
+    """
+    Simulates applying a patch to a server using the patch's own data
+    dict directly, instead of looking it up by ID in the static
+    AVAILABLE_PATCHES catalogue.
+
+    This is what allows patches sourced from patch_feed_poller.py (real
+    Ubuntu USNs pulled live from Canonical) to deploy correctly, since
+    they are never added to AVAILABLE_PATCHES — that list only contains
+    the original hand-written demo patches.
+    """
+    from patch_inventory import SERVER_REGISTRY, PATCH_HISTORY
+
+    hostname = hostname.upper()
+    server = SERVER_REGISTRY.get(hostname)
+    patch_id = patch.get("patch_id", "UNKNOWN")
+
+    if not server:
+        return {"success": False, "error": f"Server {hostname} not found in registry"}
+
+    # Simulate realistic success/failure — same 90% success rate as the
+    # original simulate_patch_apply() in patch_inventory.py
+    success = random.random() > 0.1
+
+    if success:
+        if hostname not in PATCH_HISTORY:
+            PATCH_HISTORY[hostname] = []
+        PATCH_HISTORY[hostname].append({
+            "patch_id": patch_id,
+            "applied_date": datetime.now().strftime("%Y-%m-%d"),
+            "status": "success",
+            "applied_by": "patch-agent",
+        })
+        SERVER_REGISTRY[hostname]["last_patched"] = datetime.now().strftime("%Y-%m-%d")
+
+        return {
+            "success": True,
+            "hostname": hostname,
+            "patch_id": patch_id,
+            "patch_title": patch.get("title", patch_id),
+            "reboot_required": patch.get("reboot_required", False),
+            "duration_minutes": patch.get("estimated_duration_minutes", 20),
+            "message": f"Patch {patch_id} successfully applied to {hostname}",
+        }
+    else:
+        return {
+            "success": False,
+            "hostname": hostname,
+            "patch_id": patch_id,
+            "error": "Patch installation failed: simulated package manager error",
+            "message": f"Patch {patch_id} FAILED on {hostname} — rollback initiated",
+        }
+
+
+# ─────────────────────────────────────────────
 #  SIMULATE DEPLOYMENT
 #  Since we are local/dev, deployment means:
 #    1. Find which servers are affected
@@ -233,7 +309,7 @@ def deploy_patch_locally(patch: dict) -> dict:
     print(f"\n[DEPLOY] Starting deployment of {patch_id}...")
 
     # Find servers that need this patch (matching OS)
-    from patch_inventory import SERVER_REGISTRY, simulate_patch_apply
+    from patch_inventory import SERVER_REGISTRY
     targeted_servers = [
         hostname for hostname, server in SERVER_REGISTRY.items()
         if server["os"] in affected_os
@@ -255,8 +331,12 @@ def deploy_patch_locally(patch: dict) -> dict:
     for hostname in targeted_servers:
         print(f"\n[DEPLOY] Applying {patch_id} to {hostname}...")
 
-        # Apply the patch
-        apply_result = simulate_patch_apply(hostname, patch_id)
+        # Apply the patch — simulate directly using the patch data we
+        # already have (⭐ CHANGED), instead of requiring it to exist in
+        # the static AVAILABLE_PATCHES catalogue. This is what lets
+        # feed-sourced patches (pulled live from Canonical's USN feed)
+        # deploy correctly, not just the original hand-written demo patches.
+        apply_result = simulate_patch_apply_from_data(hostname, patch)
 
         if apply_result["success"]:
             print(f"[DEPLOY] ✅ Patch applied to {hostname}")

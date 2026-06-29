@@ -1,0 +1,19 @@
+{
+  "patch_id": "USN-7486-1",
+  "title": "libfcgi vulnerability",
+  "severity": "important",
+  "cve_ids": [
+    "CVE-2025-23016"
+  ],
+  "cve_score": 6.5,
+  "affected_os": [
+    "Ubuntu 22.04 LTS",
+    "Ubuntu 24.04 LTS"
+  ],
+  "patch_type": "security",
+  "reboot_required": false,
+  "release_date": "2025-05-06",
+  "description": "It was discovered that FastCGI incorrectly handled certain inputs.\nAn attacker could possibly use this issue to cause a crash or\nexecute arbitrary code.",
+  "source": "canonical_usn_feed",
+  "source_url": "https://ubuntu.com/security/notices/USN-7486-1"
+}

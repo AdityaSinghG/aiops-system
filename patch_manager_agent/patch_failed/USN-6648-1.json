@@ -1,0 +1,12 @@
+{
+  "patch_id": "USN-6648-1",
+  "title": "Linux kernel vulnerabilities - Ubuntu 22.04 LTS",
+  "severity": "critical",
+  "cve_ids": ["CVE-2024-0193", "CVE-2024-0582"],
+  "cve_score": 9.3,
+  "affected_os": ["Ubuntu 22.04 LTS"],
+  "patch_type": "security",
+  "reboot_required": true,
+  "release_date": "2024-01-12",
+  "description": "Critical Linux kernel security update addressing use-after-free vulnerability in nftables. Affects all production application servers running Ubuntu 22.04 LTS."
+}

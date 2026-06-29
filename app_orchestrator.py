@@ -24,8 +24,8 @@ def route_event(event: AIOpsEvent) -> AIOpsEvent:
         return event
 
     elif event.event_type == "patch_needed":
-        print("[APP Orchestrator] Routing to → Patch Manager Agent")     # ⭐ CHANGED
-        return run_patch_manager_for_event(event)                        # ⭐ CHANGED
+        print("[APP Orchestrator] Routing to → Patch Manager Agent")
+        return run_patch_manager_for_event(event)
 
     else:
         print(f"[APP Orchestrator] Unknown event type: {event.event_type}")
@@ -34,7 +34,7 @@ def route_event(event: AIOpsEvent) -> AIOpsEvent:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  NEW FUNCTION — run_patch_manager_for_event  ⭐ NEW
+#  NEW FUNCTION — run_patch_manager_for_event
 #
 #  Bridges an incoming AIOpsEvent (patch_needed) to the Patch Manager
 #  Agent's existing orchestrator (patch_orchestrator.py), then translates
@@ -44,6 +44,13 @@ def route_event(event: AIOpsEvent) -> AIOpsEvent:
 #
 #  This function does NOT change anything inside patch_manager_agent —
 #  it only adapts between the two event formats.
+#
+#  ⭐ UPDATED: Now also runs the same explicit knowledge-base check that
+#  the manual patch_receiver.py path does — "has this patch been seen
+#  before, what happened last time" — before dispatching to the agent.
+#  This closes the gap where the automated path skipped straight to
+#  analysis without first checking institutional memory, unlike the
+#  manual path which always shows this to the operator.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_patch_manager_for_event(event: AIOpsEvent) -> AIOpsEvent:
@@ -69,10 +76,51 @@ def run_patch_manager_for_event(event: AIOpsEvent) -> AIOpsEvent:
         sys.path.insert(0, patch_manager_dir)
 
     from patch_orchestrator import trigger_patch_server
-    from patch_inventory import SERVER_REGISTRY
+    from patch_inventory import SERVER_REGISTRY, AVAILABLE_PATCHES
 
     print(f"[APP Orchestrator] Patch target host: {event.target_host}")
     print(f"[APP Orchestrator] Severity: {event.severity}")
+
+    # ── ⭐ NEW: Explicit knowledge-base check, same as the manual path ──────
+    # We try to identify which specific patch triggered this event so we
+    # can look it up. Infra Monitoring's alert_title includes the patch
+    # ID (e.g. "...highest: KB5034441, critical)"), so we extract it from
+    # there. If we can't identify a specific patch ID, we skip this step
+    # gracefully — the rest of the flow is unaffected either way.
+    kb_summary_note = ""
+    try:
+        from patch_receiver import check_kb_for_patch
+
+        # Try to find a known patch_id mentioned in the alert title
+        matched_patch = None
+        for candidate in AVAILABLE_PATCHES:
+            if candidate["patch_id"] in event.alert_title:
+                matched_patch = candidate
+                break
+
+        if matched_patch:
+            print(f"[APP Orchestrator] Checking knowledge base for {matched_patch['patch_id']}...")
+            kb_check = check_kb_for_patch(matched_patch)
+
+            if kb_check["found"] or kb_check["past_deployment_count"] > 0:
+                print(f"[APP Orchestrator] ✅ Patch found in knowledge base!")
+                print(f"[APP Orchestrator] Recommendation: {kb_check['recommendation']}")
+                print(f"[APP Orchestrator] Past deployments: {kb_check['past_deployment_count']}")
+            else:
+                print(f"[APP Orchestrator] 🆕 Patch not previously seen in knowledge base.")
+
+            kb_summary_note = (
+                f"KB check: {kb_check['recommendation']} "
+                f"(past deployments: {kb_check['past_deployment_count']})"
+            )
+        else:
+            print(f"[APP Orchestrator] Could not identify a specific known patch ID from alert title — "
+                  f"skipping explicit KB lookup, proceeding to full analysis.")
+            kb_summary_note = "No specific patch ID matched for KB lookup; proceeded directly to analysis."
+
+    except Exception as kb_err:
+        print(f"[APP Orchestrator] KB check skipped (non-critical): {kb_err}")
+        kb_summary_note = "KB check skipped due to error."
 
     # Map P1/P2 severity to whether this should be force-approved.
     # P1 (critical, CVSS-driven emergency) proceeds immediately.
@@ -119,7 +167,8 @@ def run_patch_manager_for_event(event: AIOpsEvent) -> AIOpsEvent:
             f"on {target_server}. Status: {agent_status}. "
             f"Patches applied: {patch_result.get('patches_applied', 0)}, "
             f"failed: {patch_result.get('patches_failed', 0)}, "
-            f"rolled back: {patch_result.get('patches_rolled_back', 0)}."
+            f"rolled back: {patch_result.get('patches_rolled_back', 0)}. "
+            f"{kb_summary_note}"
         )
 
         print(f"[APP Orchestrator] Patch Manager result: {event.resolution_status}")

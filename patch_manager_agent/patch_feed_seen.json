@@ -1,0 +1,22 @@
+{
+  "USN-7486-1": {
+    "pulled_at": "2026-06-29T02:13:42.896497",
+    "outcome": "dropped"
+  },
+  "USN-7750-1": {
+    "pulled_at": "2026-06-29T02:13:43.318048",
+    "outcome": "dropped"
+  },
+  "USN-8012-1": {
+    "pulled_at": "2026-06-29T02:13:43.685398",
+    "outcome": "dropped"
+  },
+  "USN-6793-1": {
+    "pulled_at": "2026-06-29T02:13:44.034518",
+    "outcome": "dropped"
+  },
+  "USN-7934-1": {
+    "pulled_at": "2026-06-29T02:13:44.429019",
+    "outcome": "dropped"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "patch_id": "USN-6793-1",
+  "title": "git vulnerabilities",
+  "severity": "important",
+  "cve_ids": [
+    "CVE-2024-32002",
+    "CVE-2024-32004",
+    "CVE-2024-32020",
+    "CVE-2024-32021",
+    "CVE-2024-32465"
+  ],
+  "cve_score": 6.5,
+  "affected_os": [
+    "Ubuntu 20.04 LTS",
+    "Ubuntu 22.04 LTS",
+    "Ubuntu 24.04 LTS"
+  ],
+  "patch_type": "security",
+  "reboot_required": false,
+  "release_date": "2024-05-28",
+  "description": "It was discovered that Git incorrectly handled certain submodules.\nAn attacker could possibly use this issue to execute arbitrary code.\nThis issue was fixed in Ubuntu 22.04 LTS, Ubuntu 23.10 and Ubuntu 24.04 LTS.\n(CVE-2024-32002)\n\nIt was discovered that Git incorrectly handled certain cloned repositories.\nAn attacker could possibly use this issue to execute arbitrary code.\n(CVE-2024-32004)\n\nIt was discovered that Git incorrectly handled local clones with hardlinked\nfiles/directories. An attacker",
+  "source": "canonical_usn_feed",
+  "source_url": "https://ubuntu.com/security/notices/USN-6793-1"
+}

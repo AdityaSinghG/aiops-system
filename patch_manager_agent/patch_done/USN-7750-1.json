@@ -1,0 +1,19 @@
+{
+  "patch_id": "USN-7750-1",
+  "title": "libjson-xs-perl vulnerability",
+  "severity": "important",
+  "cve_ids": [
+    "CVE-2025-40928"
+  ],
+  "cve_score": 6.5,
+  "affected_os": [
+    "Ubuntu 22.04 LTS",
+    "Ubuntu 24.04 LTS"
+  ],
+  "patch_type": "security",
+  "reboot_required": false,
+  "release_date": "2025-09-15",
+  "description": "It was discovered that JSON-XS incorrectly handled parsing certain JSON\ndata. An attacker could possibly use this issue to cause JSON-XS to crash,\nresulting in a denial of service.",
+  "source": "canonical_usn_feed",
+  "source_url": "https://ubuntu.com/security/notices/USN-7750-1"
+}

@@ -17,5 +17,218 @@
     "kb_was_used": true,
     "notes": "Some servers failed health check",
     "source_file": "KB5034441.json"
+  },
+  {
+    "patch_id": "KB5034441",
+    "title": "2024-01 Cumulative Update for Windows Server 2022",
+    "severity": "critical",
+    "cve_score": 9.8,
+    "deployed_at": "2026-06-29T01:51:00.846675",
+    "outcome": "success",
+    "servers_targeted": [
+      "WEB-PROD-01",
+      "WEB-PROD-02",
+      "WEB-STG-01",
+      "INFRA-MGMT-01"
+    ],
+    "servers_passed": 4,
+    "servers_failed": 0,
+    "kb_was_used": true,
+    "notes": "All servers healthy post-patch",
+    "source_file": "KB5034441.json"
+  },
+  {
+    "patch_id": "USN-6648-1",
+    "title": "Linux kernel vulnerabilities - Ubuntu 22.04 LTS",
+    "severity": "critical",
+    "cve_score": 9.3,
+    "deployed_at": "2026-06-29T01:54:52.727788",
+    "outcome": "failed",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "APP-STG-01"
+    ],
+    "servers_passed": 2,
+    "servers_failed": 1,
+    "kb_was_used": true,
+    "notes": "Some servers failed health check",
+    "source_file": "USN-6648-1.json"
+  },
+  {
+    "patch_id": "USN-6793-1",
+    "title": "git vulnerabilities",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:06:35.031093",
+    "outcome": "failed",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "MON-PROD-01",
+      "APP-STG-01",
+      "BACKUP-01"
+    ],
+    "servers_passed": 0,
+    "servers_failed": 5,
+    "kb_was_used": true,
+    "notes": "Some servers failed health check",
+    "source_file": "USN-6793-1.json"
+  },
+  {
+    "patch_id": "USN-7486-1",
+    "title": "libfcgi vulnerability",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:06:38.771997",
+    "outcome": "failed",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "APP-STG-01"
+    ],
+    "servers_passed": 0,
+    "servers_failed": 3,
+    "kb_was_used": true,
+    "notes": "Some servers failed health check",
+    "source_file": "USN-7486-1.json"
+  },
+  {
+    "patch_id": "USN-7750-1",
+    "title": "libjson-xs-perl vulnerability",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:06:41.680714",
+    "outcome": "failed",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "APP-STG-01"
+    ],
+    "servers_passed": 0,
+    "servers_failed": 3,
+    "kb_was_used": true,
+    "notes": "Some servers failed health check",
+    "source_file": "USN-7750-1.json"
+  },
+  {
+    "patch_id": "USN-7934-1",
+    "title": "linux-azure, linux-azure-6.14 vulnerabilities",
+    "severity": "critical",
+    "cve_score": 8.5,
+    "deployed_at": "2026-06-29T02:06:44.292364",
+    "outcome": "failed",
+    "servers_targeted": [],
+    "servers_passed": 0,
+    "servers_failed": 0,
+    "kb_was_used": true,
+    "notes": "No servers found running ['Ubuntu 24.04 LTS']",
+    "source_file": "USN-7934-1.json"
+  },
+  {
+    "patch_id": "USN-8012-1",
+    "title": "gh vulnerabilities",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:06:47.103858",
+    "outcome": "failed",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "APP-STG-01"
+    ],
+    "servers_passed": 0,
+    "servers_failed": 3,
+    "kb_was_used": true,
+    "notes": "Some servers failed health check",
+    "source_file": "USN-8012-1.json"
+  },
+  {
+    "patch_id": "USN-6793-1",
+    "title": "git vulnerabilities",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:16:11.330675",
+    "outcome": "success",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "MON-PROD-01",
+      "APP-STG-01",
+      "BACKUP-01"
+    ],
+    "servers_passed": 5,
+    "servers_failed": 0,
+    "kb_was_used": true,
+    "notes": "All servers healthy post-patch",
+    "source_file": "USN-6793-1.json"
+  },
+  {
+    "patch_id": "USN-7486-1",
+    "title": "libfcgi vulnerability",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:16:14.037784",
+    "outcome": "success",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "APP-STG-01"
+    ],
+    "servers_passed": 3,
+    "servers_failed": 0,
+    "kb_was_used": true,
+    "notes": "All servers healthy post-patch",
+    "source_file": "USN-7486-1.json"
+  },
+  {
+    "patch_id": "USN-7750-1",
+    "title": "libjson-xs-perl vulnerability",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:16:16.496420",
+    "outcome": "success",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "APP-STG-01"
+    ],
+    "servers_passed": 3,
+    "servers_failed": 0,
+    "kb_was_used": true,
+    "notes": "All servers healthy post-patch",
+    "source_file": "USN-7750-1.json"
+  },
+  {
+    "patch_id": "USN-7934-1",
+    "title": "linux-azure, linux-azure-6.14 vulnerabilities",
+    "severity": "critical",
+    "cve_score": 8.5,
+    "deployed_at": "2026-06-29T02:16:20.353630",
+    "outcome": "failed",
+    "servers_targeted": [],
+    "servers_passed": 0,
+    "servers_failed": 0,
+    "kb_was_used": true,
+    "notes": "No servers found running ['Ubuntu 24.04 LTS']",
+    "source_file": "USN-7934-1.json"
+  },
+  {
+    "patch_id": "USN-8012-1",
+    "title": "gh vulnerabilities",
+    "severity": "important",
+    "cve_score": 6.5,
+    "deployed_at": "2026-06-29T02:16:23.128061",
+    "outcome": "failed",
+    "servers_targeted": [
+      "APP-PROD-01",
+      "APP-PROD-02",
+      "APP-STG-01"
+    ],
+    "servers_passed": 2,
+    "servers_failed": 1,
+    "kb_was_used": true,
+    "notes": "Some servers failed health check",
+    "source_file": "USN-8012-1.json"
   }
 ]
